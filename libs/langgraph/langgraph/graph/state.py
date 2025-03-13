@@ -2,6 +2,7 @@ import inspect
 import logging
 import typing
 import warnings
+import weakref
 from functools import partial
 from inspect import isclass, isfunction, ismethod, signature
 from types import FunctionType
@@ -23,7 +24,7 @@ from typing import (
     overload,
 )
 
-from langchain_core.runnables import Runnable, RunnableConfig
+from langchainore.runnables import Runnable, RunnableConfig
 from pydantic import BaseModel
 from pydantic.v1 import BaseModel as BaseModelV1
 from typing_extensions import Annotated, Self
@@ -951,14 +952,22 @@ def _pick_mapper(
 
 
 class _SchemaCoercionMapper:
-    _cache: dict[tuple[Type[Any], int], "_SchemaCoercionMapper"] = {}
+    # Use a class-level dictionary to store weak references to both keys and values
+    _cache = {}
 
     def __new__(cls, schema: Type[Any], max_depth: int = 5) -> "_SchemaCoercionMapper":
-        key = (schema, max_depth)
+        # Create a key that can be used for lookup but doesn't prevent garbage collection
+        key_id = id(schema)
+        key = (key_id, max_depth)
+
+        # Check if we have a cached instance
         if key in cls._cache:
-            return cls._cache[key]
+            cached_ref = cls._cache[key]()
+            if cached_ref is not None:
+                return cached_ref
+
         inst = super().__new__(cls)
-        cls._cache[key] = inst
+        cls._cache[key] = weakref.ref(inst, lambda _: cls._cache.pop(key, None))
         return inst
 
     def __init__(self, schema: Type[Any], max_depth: int = 5):
